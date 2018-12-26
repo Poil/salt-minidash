@@ -61,6 +61,10 @@ def minion():
     with multiprocessing.Pool(processes=20) as pool:
         results = pool.map(get_grains, minions_l)
 
+    with multiprocessing.Pool(processes=20) as pool:
+        last_jobs = pool.map(get_last_job, minions_l)
+    pprint(last_jobs)
+
     for status in minions_report.get('return', []):
         for state, minions in status.items():
             for minion_id in minions:
@@ -69,6 +73,10 @@ def minion():
                     if res.get(minion_id):
                         grains = res[minion_id]
                         continue
+                #for jb in last_jobs:
+                #    if jb.get(minion_id):
+                #        job = jb[minion_id]
+                #        continue
                 my_minions[minion_id] = { 'grains': grains, 'state': state }
 
     return render_template('minions.html.j2', my_minions=my_minions)
@@ -77,8 +85,23 @@ def minion():
 def get_grains(minion_id):
     p = check_auth()
     print('checking minion %s grains' % minion_id)
-    #pprint(p.low({'fun': 'grains.items', 'tgt': minion_id, 'client': 'local'}))
-    return p.local(fun='grains.items', tgt=minion_id.strip()).get('return')[0]
+    return p.local(fun='grains.items', tgt=minion_id).get('return')[0]
+
+
+def get_last_job(minion_id):
+    p = check_auth()
+    print('checking minion %s last job' % minion_id)
+    jobs = p.runner(fun='jobs.last_run', tgt=minion_id, function= 'state.apply').get('return')[0]
+    for job_id, job in jobs.items():
+        print('getting minion ' + minion_id)
+        pprint(job.get('Result', {}).get(minion_id, {}))
+        return {
+            minion_id: {
+                'job_id': job_id,
+                'result': job.get('Result', {}).get(minion_id, {}).get('retcode')
+                }
+            }
+
 
 @app.route('/jobs/<string:minion_id>', methods=['GET'])
 def jobs(minion_id):
@@ -90,7 +113,7 @@ def jobs(minion_id):
     for jobsd in jobs_report.get('return', []):
         jobs_id = jobsd.keys()
         with multiprocessing.Pool(processes=20) as pool:
-            results = pool.starmap(job_exit, product([minion_id], jobs_id))
+            results = pool.starmap(job_exit, itertools.product([minion_id], jobs_id))
 
         for job_id, job in jobsd.items():
             my_jobs[job_id] = job
