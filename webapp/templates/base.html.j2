@@ -1,0 +1,27 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1, shrink-to-fit=no">
+	<title>Saltstack Mini Dash</title>
+	<link rel="stylesheet" href="{{ url_for('static', filename='css/bootstrap.min.css') }}">
+	<link rel="stylesheet" href="{{ url_for('static', filename='css/datatables.min.css') }}">
+	<script src="{{ url_for('static', filename='js/bootstrap.bundle.min.js') }}"></script>
+	<script src="{{ url_for('static', filename='js/jquery-3.3.1.min.js') }}"></script>
+	<script src="{{ url_for('static', filename='js/jquery.dataTables.min.js') }}"></script>
+	<script src="{{ url_for('static', filename='js/dataTables.bootstrap4.min.js') }}"></script>
+	<script>
+		$(document).ready(function() {
+    		$('.table').DataTable();
+		} );
+	</script>
+</head>
+<body>
+	{% include 'navbar.html.j2' %}
+	<main role="main" class="container-fluid">
+		{% block content %}
+		{% endblock %}
+    </main>
+</body>
+</html>
+

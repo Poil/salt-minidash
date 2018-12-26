@@ -1,7 +1,11 @@
 import os
-from flask import Flask, session, redirect, url_for, escape, request, jsonify
+from flask import Flask, session, redirect, url_for, escape, request, jsonify, render_template
 from pepper import Pepper, PepperException
 import json
+from datetime import datetime, timedelta
+import itertools
+import multiprocessing
+from pprint import pprint
 
 app = Flask(__name__)
 app.config['SECRET_KEY'] = os.getenv('SECRET_KEY') or 'UuX1Pieniuf1Ethu4ti9oeg2chahth4Y'
@@ -33,16 +37,7 @@ def login():
             session['password'] = request.form['password']
             session['eauth'] = request.form['eauth']
             return redirect(url_for('index'))
-    return ('''<form action="" method="post">
-                <p><input type="text" name="username" /></p>
-                <p><input type="password" name="password" /></p>
-                <p>
-                  <select name="eauth">
-                    <option value="pam">pam</option>
-                  </select>
-                </p>
-                <p><input type="submit" value="Login" /></p>
-            </form>''')
+    return render_template('login.html.j2')
 
 
 @app.route('/logout')
@@ -59,51 +54,85 @@ def minion():
     """ minions """
     p = check_auth()
     minions_report = p.runner('manage.status')
-    html = ('<table><thead><tr><th>Minion</th><th>Status</th>'
-            '<th>OS</th><th>OS Release</th><th>Kernel</th></thead><tbody>')
+    my_minions = {}
+    minions_l = (list(minions_report.get('return',[])[0].get('down')) +
+                 list(minions_report.get('return',[])[0].get('up')))
+
+    with multiprocessing.Pool(processes=20) as pool:
+        results = pool.map(get_grains, minions_l)
+
     for status in minions_report.get('return', []):
         for state, minions in status.items():
-            for minion in minions:
-                grains = p.low({'fun': 'grains.items', 'tgt': minion, 'client': 'local'}).get(
-                    'return', [])[0][minion]
-                if not grains:
-                    grains = {}
-                html += (f'<tr><td><a href="/jobs/{minion}">{minion}</a></td><td>{state}</td>'
-                         f"<td>{grains.get('osfullname')}</td><td>{grains.get('osrelease')}</td>"
-                         f"<td>{grains.get('kernelrelease')}</td></tr>")
-    html += '</tbody></table>'
-    return html
+            for minion_id in minions:
+                grains = {}
+                for res in results:
+                    if res.get(minion_id):
+                        grains = res[minion_id]
+                        continue
+                my_minions[minion_id] = { 'grains': grains, 'state': state }
 
+    return render_template('minions.html.j2', my_minions=my_minions)
+
+
+def get_grains(minion_id):
+    p = check_auth()
+    print('checking minion %s grains' % minion_id)
+    #pprint(p.low({'fun': 'grains.items', 'tgt': minion_id, 'client': 'local'}))
+    return p.local(fun='grains.items', tgt=minion_id.strip()).get('return')[0]
 
 @app.route('/jobs/<string:minion_id>', methods=['GET'])
 def jobs(minion_id):
     p = check_auth()
-    jobs_report = p.runner('jobs.list_jobs', search_target=minion_id)
-    html = '<table><thead><tr><th>Job ID</th><th>Date</th><th>Type</th><th>Success</th></thead><tbody>'
+    yesterday = str(datetime.now() - timedelta(1))
+    jobs_report = p.runner('jobs.list_jobs', search_target=minion_id, start_time=yesterday)
+    my_jobs = {}
+
     for jobsd in jobs_report.get('return', []):
+        jobs_id = jobsd.keys()
+        with multiprocessing.Pool(processes=20) as pool:
+            results = pool.starmap(job_exit, product([minion_id], jobs_id))
+
         for job_id, job in jobsd.items():
-            job_state = p.runner('jobs.exit_success', job_id)
-            html += (f'<tr><td><a href="/job/{minion_id}/{job_id}">{job_id}</a></td>'
-                     f"<td>{job['StartTime']}</td>"
-                     f"<td>{job['Function']}</td>"
-                     f"<td>{job_state}</td></tr>")
-    html += '</tbody></table>'
-    return html
+            my_jobs[job_id] = job
+            my_jobs[job_id]['State'] = False
+            for res in results:
+                if res.get(minion_id):
+                    my_jobs[job_id]['State'] = res[minion_id]
+    return render_template('jobs.html.j2', minion_id=minion_id, my_jobs=my_jobs)
 
 
-@app.route('/job/<string:minion_id>/<string:job_id>', methods=['GET'])
+def job_exit(minion_id, job_id):
+    p = check_auth()
+    print('checking minion %s job_id %s' % (minion_id, job_id))
+    return {minion_id: p.runner('jobs.exit_success', job_id).get('return',
+        [{minion_id: False}])[0].get(minion_id, False)}
+
+
+@app.route('/jobs/<string:minion_id>/<string:job_id>', methods=['GET'])
 def job(minion_id, job_id):
+    import json
     p = check_auth()
     job_report = p.runner('jobs.lookup_jid', job_id)
-    html = '<table><thead><tr><th>Resource</th><th>Result</th><th>Change</th></thead><tbody>'
+    my_job = {}
+
     for jobd in job_report.get('return', []):
-        for minion, report in jobd.items():
-            if minion == minion_id:
-                for resource, details in report.items():
-                    html += (f"<tr><td>{resource}</td><td>{details['result']}</td>"
-                             f"<td>{details.get('pchanges', '')}</td></tr>")
-    html += '</tbody></table>'
-    return html
+        for type_report, report in jobd.items():
+            if type(report) == dict:
+                for minion, reportd in report.items():
+                    if minion == minion_id:
+                        for minion, details in report.items():
+                            for resource, resource_detail in details.items():
+                                rsc = resource.split('_|-')
+                                my_job[resource] = {}
+                                my_job[resource]['changes'] = json.dumps(
+                                        resource_detail['changes'], indent=4, sort_keys=True)
+                                my_job[resource]['type'] = rsc[0]
+                                my_job[resource]['target'] = rsc[1]
+                                my_job[resource]['apply'] = rsc[2]
+                                my_job[resource]['option'] = rsc[3]
+            else:
+                print('%s is not a valid dict' % report)
+    return render_template('job_details.html.j2', minion_id=minion_id, job_id=job_id, my_job=my_job)
 
 
 if __name__ == '__main__':
