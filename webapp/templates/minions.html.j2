@@ -11,15 +11,17 @@
 						<th>OS</th>
 						<th>OS Release</th>
 						<th>Kernel</th>
+						<th>Python Version</th>
 				</thead>
 				<tbody>
 					{% for minion, val in my_minions.items() %}
 						<tr>
-							<td><a href="/jobs/{{ minion }}">{{ minion }}</a></td>
+                            <td><a href="/jobs/{{ minion }}">{{ minion }}</a></td>
 							<td>{{ val['state'] }}</td>
 							<td>{{ val['grains'].get('osfullname') }}</td>
 							<td>{{ val['grains'].get('osrelease') }}</td>
 							<td>{{ val['grains'].get('kernelrelease') }}</td>
+                            <td>{{ val['grains'].get('pythonversion', [])|join('.') }}</td>
 						</tr>
 				{% endfor %}
 				</tbody>
