@@ -1,2 +1,4 @@
 salt-pepper
 Flask
+python-dateutil
+gunicorn
