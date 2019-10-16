@@ -1,0 +1,32 @@
+---
+stages:
+  - docker_mainbranch_build
+
+default:
+  variables:
+    PIPENV_VENV_IN_PROJECT: 'true'
+    http_proxy: http://proxy.ssllab.com:3128/
+    https_proxy: http://proxy.ssllab.com:3128/
+    no_proxy: engsec, intra.biniou, ssllab.com
+    CO_DOCKER_BASE_IMAGE: harbor.engsec/orange/python36:latest
+    CO_DOCKER_HARBOR_URI: harbor.engsec/infra
+
+docker_build_mainbranch:
+  stage: docker_mainbranch_build
+  cache: {}
+  dependencies: []
+  only:
+    refs:
+      - master
+  except:
+    refs:
+      - schedules
+  script:
+    - docker pull ${CO_DOCKER_BASE_IMAGE}
+    - /usr/local/bin/s2i build -e ENABLE_PIPENV=true
+      .
+      ${CO_DOCKER_BASE_IMAGE} ${CO_DOCKER_HARBOR_URI}/${CI_PROJECT_NAME}:latest
+    - docker push ${CO_DOCKER_HARBOR_URI}/${CI_PROJECT_NAME}:latest
+  tags:
+    - build_docker
+...
